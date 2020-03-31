@@ -1,0 +1,5 @@
+# github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
+github.com/songgao/water
+# golang.org/x/sys v0.0.0-20200331124033-c3d80250170d
+golang.org/x/sys/windows
+golang.org/x/sys/windows/registry
