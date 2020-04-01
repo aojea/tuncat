@@ -67,11 +67,6 @@ func (n Netconfig) CreateMasquerade(dev string) error {
 	if err := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", dev, "-j", "MASQUERADE").Run(); err != nil {
 		return err
 	}
-	// It allows to return the traffic to the tunnel using policy based source routing
-	if err := exec.Command("ip", "route", "flush", "table", "10").Run(); err != nil {
-		return err
-	}
-
 	if err := exec.Command("ip", "route", "add", "table", "10", "to", "default", "via", n.ip).Run(); err != nil {
 		return err
 	}

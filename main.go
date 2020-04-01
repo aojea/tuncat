@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"time"
 )
 
 func validate(ifAddress, remoteNetwork, remoteGateway string) error {
@@ -75,11 +74,6 @@ func main() {
 	// Global configuration
 	flag.Parse()
 
-	if err := validate(ifAddress, remoteNetwork, remoteGateway); err != nil {
-		log.Fatalf("Validation error %v", err)
-		os.Exit(1)
-	}
-
 	// Connect command
 	if connectCmd.Parsed() {
 		// Obtain remote port and remote address
@@ -87,41 +81,22 @@ func main() {
 			connectCmd.PrintDefaults()
 			os.Exit(1)
 		}
-		// Connect to the remote address
+		// Configure a new client
 		remoteHost := net.JoinHostPort(*remoteAddress, strconv.Itoa(*remotePort))
-		log.Printf("Connecting to %s", remoteHost)
-		conn, err := net.Dial("tcp", remoteHost)
-		if err != nil {
-			log.Fatalf("Can't connect to server %q: %v", remoteHost, err)
+		// Validate configuration
+		if err := validate(ifAddress, remoteNetwork, remoteGateway); err != nil {
+			log.Fatalf("Validation error %v", err)
+			os.Exit(1)
 		}
-		defer conn.Close()
-		// Establish the connection: send the tunnel parameters
-		errChan := make(chan error, 1)
-		timeout := 10 * time.Second
-		go func() {
-			errChan <- ClientConnect(conn, remoteNetwork, remoteGateway)
-		}()
-
-		// wait for the first thing to happen, either
-		// an error, a timeout, or a result
-		select {
-		case err := <-errChan:
-			if err != nil {
-				log.Fatalf("Can't establish connection: %v", err)
-			}
-		case <-time.After(timeout):
-			log.Fatal("Can't establish connection: Timed Out")
+		client := NewClient(remoteHost)
+		client.IfAddress = ifAddress
+		client.RemoteNetwork = remoteNetwork
+		client.RemoteGateway = remoteGateway
+		// Connect to the server
+		if err := client.Start(); err != nil {
+			log.Printf("Client error: %v", err)
 		}
-		// Create the Host Interface
-		log.Println("Create Host Interface ...")
-		ifce, err := NewHostInterface(ifAddress, remoteNetwork, remoteGateway, false)
-		if err != nil {
-			log.Fatalf("Error creating Host Interface: %v", err)
-		}
-		// Create the tunnel in client mode
-		tun := NewTunnel(conn, ifce)
-		// Run the tunnel until it fails or is killed
-		tun.Run()
+		client.Close()
 	}
 
 	// Listen command
@@ -130,53 +105,22 @@ func main() {
 			listenCmd.PrintDefaults()
 			os.Exit(1)
 		}
+
+		// Configure a new Server
+		listenAddress := net.JoinHostPort(*sourceAddress, strconv.Itoa(*sourcePort))
+		server := NewServer(listenAddress)
+		// Validate configuration
+		if err := validate(ifAddress, "", ""); err != nil {
+			log.Fatalf("Validation error %v", err)
+			os.Exit(1)
+		}
+		if ifAddress != "" {
+			server.IfAddress = ifAddress
+		}
 		// Listen
-		sourceHost := net.JoinHostPort(*sourceAddress, strconv.Itoa(*sourcePort))
-		ln, err := net.Listen("tcp", sourceHost)
-		if err != nil {
-			log.Fatalf("Can't Listen on address %s : %v", sourceHost, err)
+		if err := server.Start(); err != nil {
+			log.Printf("Server error: %v", err)
 		}
-
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				log.Fatalf("Can't accept connection on address %s : %v", sourceHost, err)
-			}
-			// Establish the connection: receive the tunnel parameters
-			errChan := make(chan error, 1)
-			timeout := 10 * time.Second
-			go func() {
-				remoteNetwork, remoteGateway, err = ServerConnect(conn)
-				errChan <- err
-			}()
-			// wait for the first thing to happen, either
-			// an error, a timeout, or a result
-			select {
-			case err := <-errChan:
-				if err != nil {
-					// Closeon error and wait for a new connection
-					log.Printf("Can't establish connection: %v", err)
-					conn.Close()
-					continue
-				}
-			case <-time.After(timeout):
-				// Closeon error and wait for a new connection
-				log.Printf("Can't establish connection: TimeOut")
-				conn.Close()
-				continue
-			}
-
-			// Create the Host Interface
-			log.Println("Creating Host Interface ...")
-			ifce, err := NewHostInterface(ifAddress, remoteNetwork, remoteGateway, true)
-			if err != nil {
-				log.Fatalf("Error creating Host Interface: %v", err)
-			}
-			// Create the tunnel and block (only accept one connection)
-			tun := NewTunnel(conn, ifce)
-			fmt.Println("Running the tunnel")
-			tun.Run()
-		}
+		server.Close()
 	}
-
 }
